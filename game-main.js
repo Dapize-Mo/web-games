@@ -1,27 +1,97 @@
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const speedLabel = document.getElementById("speed");
-const positionLabel = document.getElementById("position");
-const resetButton = document.getElementById("reset");
+const gameContainer = document.getElementById('game-container');
+const speedLabel = document.getElementById('speed');
+const positionLabel = document.getElementById('position');
+const resetButton = document.getElementById('reset');
 
-const world = {
-  width: canvas.width,
-  height: canvas.height,
-  padding: 60,
-  perspectiveDistance: 2000,
-};
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0f15);
+scene.fog = new THREE.Fog(0x0a0f15, 100, 300);
 
+// Camera - positioned to see whole surface from top-right
+const camera = new THREE.PerspectiveCamera(
+  45,
+  gameContainer.clientWidth / gameContainer.clientHeight,
+  0.1,
+  1000
+);
+camera.position.set(60, 80, 60);
+camera.lookAt(0, 0, 0);
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowShadowMap;
+gameContainer.appendChild(renderer.domElement);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+directionalLight.position.set(50, 100, 50);
+directionalLight.castShadow = true;
+directionalLight.shadow.mapSize.width = 2048;
+directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.camera.far = 200;
+directionalLight.shadow.camera.left = -100;
+directionalLight.shadow.camera.right = 100;
+directionalLight.shadow.camera.top = 100;
+directionalLight.shadow.camera.bottom = -100;
+scene.add(directionalLight);
+
+// Ball physics
 const ball = {
-  radius: 22,
-  x: world.width / 2,
-  y: world.height * 0.35,
-  vx: 0,
-  vy: 0,
-  maxSpeed: 6,
-  accel: 0.38,
-  friction: 0.88,
+  position: new THREE.Vector3(0, 1, 0),
+  velocity: new THREE.Vector3(0, 0, 0),
+  radius: 1,
+  maxSpeed: 5.5,
+  accel: 0.35,
+  friction: 0.9,
+  mass: 1,
+  inertia: 0.4 * 1 * 1 * 1,
+  angularVelocity: new THREE.Vector3(0, 0, 0),
 };
 
+// Create ball mesh
+const ballGeometry = new THREE.SphereGeometry(ball.radius, 32, 32);
+const ballMaterial = new THREE.MeshStandardMaterial({
+  color: 0x98d6ff,
+  metalness: 0.6,
+  roughness: 0.4,
+});
+const ballMesh = new THREE.Mesh(ballGeometry, ballMaterial);
+ballMesh.castShadow = true;
+ballMesh.receiveShadow = true;
+scene.add(ballMesh);
+
+// Create surface/arena
+const surfaceGeometry = new THREE.PlaneGeometry(120, 120);
+const surfaceMaterial = new THREE.MeshStandardMaterial({
+  color: 0x1f2f3f,
+  metalness: 0.1,
+  roughness: 0.8,
+});
+const surfaceMesh = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+surfaceMesh.rotation.x = -Math.PI / 2;
+surfaceMesh.receiveShadow = true;
+scene.add(surfaceMesh);
+
+// Add grid to surface
+const gridHelper = new THREE.GridHelper(120, 24, 0x444444, 0x222222);
+gridHelper.position.y = 0.01;
+scene.add(gridHelper);
+
+// Add boundary walls (invisible)
+const boundaries = {
+  xMin: -60,
+  xMax: 60,
+  zMin: -60,
+  zMax: 60,
+};
+
+// Input
 const input = {
   up: false,
   down: false,
@@ -30,34 +100,25 @@ const input = {
   sprint: false,
 };
 
-// Create grass with layered depth for brute force effect - OPTIMIZED
-const grassLayers = [];
-const grassBlades = [];
-console.log(`Rendering surface with optimized physics`);
-
 let isActive = false;
-let frameCount = 0;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
 function resetBall() {
-  ball.x = world.width / 2;
-  ball.y = world.height * 0.35;
-  ball.vx = 0;
-  ball.vy = 0;
+  ball.position.set(0, ball.radius, 0);
+  ball.velocity.set(0, 0, 0);
+  ball.angularVelocity.set(0, 0, 0);
 }
 
 function updateInput(event, isDown) {
-  if (!isActive) return;
   const key = event.key.toLowerCase();
-  
-  if (["arrowup", "w"].includes(key)) input.up = isDown;
-  if (["arrowdown", "s"].includes(key)) input.down = isDown;
-  if (["arrowleft", "a"].includes(key)) input.left = isDown;
-  if (["arrowright", "d"].includes(key)) input.right = isDown;
-  if (event.key === "Shift") input.sprint = isDown;
+  if (['arrowup', 'w'].includes(key)) input.up = isDown;
+  if (['arrowdown', 's'].includes(key)) input.down = isDown;
+  if (['arrowleft', 'a'].includes(key)) input.left = isDown;
+  if (['arrowright', 'd'].includes(key)) input.right = isDown;
+  if (event.key === 'Shift') input.sprint = isDown;
   if (key === "r") {
     resetBall();
     event.preventDefault();
@@ -65,164 +126,126 @@ function updateInput(event, isDown) {
 }
 
 function applyPhysics() {
-  const sprintMultiplier = input.sprint ? 1.7 : 1;
-  if (input.up) ball.vy -= ball.accel * sprintMultiplier;
-  if (input.down) ball.vy += ball.accel * sprintMultiplier;
-  if (input.left) ball.vx -= ball.accel * sprintMultiplier;
-  if (input.right) ball.vx += ball.accel * sprintMultiplier;
+  const sprintMultiplier = input.sprint ? 1.6 : 1;
+  const moveDirection = new THREE.Vector3();
 
-  ball.vx *= ball.friction;
-  ball.vy *= ball.friction;
+  if (input.up) moveDirection.z -= 1;
+  if (input.down) moveDirection.z += 1;
+  if (input.left) moveDirection.x -= 1;
+  if (input.right) moveDirection.x += 1;
 
+  if (moveDirection.length() > 0) {
+    moveDirection.normalize();
+    const accel = ball.accel * sprintMultiplier;
+    ball.velocity.addScaledVector(moveDirection, accel);
+  }
+
+  // Friction
+  ball.velocity.multiplyScalar(ball.friction);
+  ball.angularVelocity.multiplyScalar(ball.friction * 0.95);
+
+  // Max speed
   const maxSpeed = ball.maxSpeed * sprintMultiplier;
-  ball.vx = clamp(ball.vx, -maxSpeed, maxSpeed);
-  ball.vy = clamp(ball.vy, -maxSpeed, maxSpeed);
-
-  ball.x += ball.vx;
-  ball.y += ball.vy;
-
-  const minX = world.padding + ball.radius;
-  const maxX = world.width - world.padding - ball.radius;
-  const minY = world.padding + ball.radius;
-  const maxY = world.height - world.padding - ball.radius;
-
-  if (ball.x < minX) {
-    ball.x = minX;
-    ball.vx *= -0.4;
-  } else if (ball.x > maxX) {
-    ball.x = maxX;
-    ball.vx *= -0.4;
+  if (ball.velocity.length() > maxSpeed) {
+    ball.velocity.clampLength(0, maxSpeed);
   }
 
-  if (ball.y < minY) {
-    ball.y = minY;
-    ball.vy *= -0.4;
-  } else if (ball.y > maxY) {
-    ball.y = maxY;
-    ball.vy *= -0.4;
+  // Apply velocity
+  ball.position.add(ball.velocity);
+
+  // Boundary collision
+  if (ball.position.x - ball.radius < boundaries.xMin) {
+    ball.position.x = boundaries.xMin + ball.radius;
+    ball.velocity.x *= -0.35;
+  } else if (ball.position.x + ball.radius > boundaries.xMax) {
+    ball.position.x = boundaries.xMax - ball.radius;
+    ball.velocity.x *= -0.35;
   }
-}
 
-function drawBackground() {
-  // Simple gradient background
-  const gradient = ctx.createLinearGradient(0, 0, 0, world.height);
-  gradient.addColorStop(0, "#1a2a3a");
-  gradient.addColorStop(0.5, "#0f1820");
-  gradient.addColorStop(1, "#0a0f15");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, world.width, world.height);
-
-  // Draw surface/arena
-  const surfaceGradient = ctx.createLinearGradient(world.padding, world.padding, world.padding, world.height - world.padding);
-  surfaceGradient.addColorStop(0, "#2a3a4a");
-  surfaceGradient.addColorStop(0.5, "#1f2f3f");
-  surfaceGradient.addColorStop(1, "#1a2530");
-  ctx.fillStyle = surfaceGradient;
-  ctx.fillRect(world.padding, world.padding, world.width - world.padding * 2, world.height - world.padding * 2);
-
-  // Border
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(world.padding, world.padding, world.width - world.padding * 2, world.height - world.padding * 2);
-
-  // Add some subtle grid pattern
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-  ctx.lineWidth = 1;
-  const gridSize = 80;
-  for (let x = world.padding; x < world.width - world.padding; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, world.padding);
-    ctx.lineTo(x, world.height - world.padding);
-    ctx.stroke();
+  if (ball.position.z - ball.radius < boundaries.zMin) {
+    ball.position.z = boundaries.zMin + ball.radius;
+    ball.velocity.z *= -0.35;
+  } else if (ball.position.z + ball.radius > boundaries.zMax) {
+    ball.position.z = boundaries.zMax - ball.radius;
+    ball.velocity.z *= -0.35;
   }
-  for (let y = world.padding; y < world.height - world.padding; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(world.padding, y);
-    ctx.lineTo(world.width - world.padding, y);
-    ctx.stroke();
+
+  // Gravity (keep ball on surface)
+  if (ball.position.y > ball.radius) {
+    ball.position.y -= 0.5;
+  }
+  ball.position.y = Math.max(ball.radius, ball.position.y);
+
+  // Rolling effect: update angular velocity based on linear velocity
+  const rollAxis = new THREE.Vector3(-ball.velocity.z, 0, ball.velocity.x);
+  if (rollAxis.length() > 0.01) {
+    const rollSpeed = ball.velocity.length() / ball.radius;
+    rollAxis.normalize().multiplyScalar(rollSpeed);
+    ball.angularVelocity.lerp(rollAxis, 0.1);
   }
 }
 
-function drawBall() {
-  ctx.save();
-  ctx.translate(ball.x, ball.y);
-
-  // Multi-layer glow
-  const glowGradient = ctx.createRadialGradient(-8, -8, 0, 0, 0, ball.radius + 12);
-  glowGradient.addColorStop(0, "rgba(200, 230, 255, 0.4)");
-  glowGradient.addColorStop(0.4, "rgba(120, 180, 255, 0.2)");
-  glowGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-  ctx.fillStyle = glowGradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, ball.radius + 12, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Main ball
-  const ballGradient = ctx.createRadialGradient(-7, -7, 6, 0, 0, ball.radius + 8);
-  ballGradient.addColorStop(0, "#ffffff");
-  ballGradient.addColorStop(0.5, "#a0d6ff");
-  ballGradient.addColorStop(1, "#3a78a1");
-  ctx.fillStyle = ballGradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Highlight
-  ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-  ctx.beginPath();
-  ctx.arc(-5, -6, ball.radius * 0.35, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.restore();
+function updateBallMesh() {
+  ballMesh.position.copy(ball.position);
+  
+  // Update rotation based on angular velocity
+  const quaternion = new THREE.Quaternion();
+  const axis = new THREE.Vector3();
+  const angle = ball.angularVelocity.length();
+  
+  if (angle > 0.001) {
+    axis.copy(ball.angularVelocity).normalize();
+    quaternion.setFromAxisAngle(axis, angle);
+    ballMesh.quaternion.multiplyQuaternions(quaternion, ballMesh.quaternion);
+  }
 }
 
 function updateHud() {
-  const speed = Math.hypot(ball.vx, ball.vy);
+  const speed = ball.velocity.length();
   speedLabel.textContent = speed.toFixed(2);
-  positionLabel.textContent = `${Math.round(ball.x)}, ${Math.round(ball.y)}`;
+  positionLabel.textContent = `${ball.position.x.toFixed(0)}, ${ball.position.z.toFixed(0)}`;
 }
 
-function tick() {
-  frameCount++;
-  
+function onWindowResize() {
+  const width = gameContainer.clientWidth;
+  const height = gameContainer.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
   if (isActive) {
     applyPhysics();
   }
 
-  drawBackground();
-  drawBall();
+  updateBallMesh();
   updateHud();
-  requestAnimationFrame(tick);
+  renderer.render(scene, camera);
 }
 
 function activate() {
   isActive = true;
-  canvas.focus();
 }
 
-canvas.setAttribute("tabindex", "0");
-canvas.addEventListener("click", activate);
-
-window.addEventListener("keydown", (event) => {
-  if (isActive && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+// Event listeners
+window.addEventListener('keydown', (event) => {
+  if (isActive && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
     event.preventDefault();
   }
   updateInput(event, true);
-});
-window.addEventListener("keyup", (event) => updateInput(event, false));
-resetButton.addEventListener("click", resetBall);
-
-// Start game on any key press
-window.addEventListener("keydown", () => {
   if (!isActive) activate();
 });
 
+window.addEventListener('keyup', (event) => updateInput(event, false));
+window.addEventListener('resize', onWindowResize);
+resetButton.addEventListener('click', resetBall);
+
+renderer.domElement.addEventListener('click', activate);
+
 resetBall();
 activate();
-tick();
+animate();
+
