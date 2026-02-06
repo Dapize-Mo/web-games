@@ -46,9 +46,9 @@ const ball = {
   position: new THREE.Vector3(0, 1, 0),
   velocity: new THREE.Vector3(0, 0, 0),
   radius: 1,
-  maxSpeed: 5.5,
-  accel: 0.35,
-  friction: 0.9,
+  maxSpeed: 3.5,
+  accel: 0.2,
+  friction: 0.85,
   mass: 1,
   inertia: 0.4 * 1 * 1 * 1,
   angularVelocity: new THREE.Vector3(0, 0, 0),
@@ -90,6 +90,9 @@ const boundaries = {
   zMin: -60,
   zMax: 60,
 };
+
+const wallRestitution = 0.65;
+const wallFriction = 0.85;
 
 // Input
 const input = {
@@ -156,18 +159,22 @@ function applyPhysics() {
   // Boundary collision
   if (ball.position.x - ball.radius < boundaries.xMin) {
     ball.position.x = boundaries.xMin + ball.radius;
-    ball.velocity.x *= -0.35;
+    ball.velocity.x = -ball.velocity.x * wallRestitution;
+    ball.velocity.z *= wallFriction;
   } else if (ball.position.x + ball.radius > boundaries.xMax) {
     ball.position.x = boundaries.xMax - ball.radius;
-    ball.velocity.x *= -0.35;
+    ball.velocity.x = -ball.velocity.x * wallRestitution;
+    ball.velocity.z *= wallFriction;
   }
 
   if (ball.position.z - ball.radius < boundaries.zMin) {
     ball.position.z = boundaries.zMin + ball.radius;
-    ball.velocity.z *= -0.35;
+    ball.velocity.z = -ball.velocity.z * wallRestitution;
+    ball.velocity.x *= wallFriction;
   } else if (ball.position.z + ball.radius > boundaries.zMax) {
     ball.position.z = boundaries.zMax - ball.radius;
-    ball.velocity.z *= -0.35;
+    ball.velocity.z = -ball.velocity.z * wallRestitution;
+    ball.velocity.x *= wallFriction;
   }
 
   // Gravity (keep ball on surface)
