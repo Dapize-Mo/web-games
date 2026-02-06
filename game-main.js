@@ -30,30 +30,31 @@ const input = {
   sprint: false,
 };
 
-// Create grass with layered depth for brute force effect
-const grassLayers = Array.from({ length: 5 }, (_, layerIdx) => {
-  const layerDepth = 0.2 + (layerIdx / 5) * 0.8;
-  const bladeCount = Math.floor(150 * (1 - layerDepth * 0.5));
+// Create grass with layered depth for brute force effect - OPTIMIZED
+const grassLayers = Array.from({ length: 6 }, (_, layerIdx) => {
+  const layerDepth = 0.1 + (layerIdx / 6) * 0.9;
+  const bladeCount = Math.floor(900 * (1 - layerDepth * 0.4));
   
   return Array.from({ length: bladeCount }, () => {
-    const baseHeight = 6 + Math.random() * 14;
+    const baseHeight = 5 + Math.random() * 12;
     return {
       x: Math.random() * world.width,
       y: world.padding + Math.random() * (world.height - world.padding * 2),
       baseHeight: baseHeight,
       height: baseHeight,
       sway: Math.random() * Math.PI * 2,
-      swaySpeed: 0.006 + Math.random() * 0.01,
+      swaySpeed: 0.005 + Math.random() * 0.008,
       bend: 0,
-      width: 1.2 + Math.random() * 1.8,
-      colorOffset: Math.random() * 0.2 - 0.1,
-      segments: 4 + Math.floor(Math.random() * 3),
+      width: 0.9 + Math.random() * 1.2,
+      colorOffset: Math.random() * 0.15 - 0.075,
       depth: layerDepth,
+      colorCache: null,
     };
   });
 });
 
 const grassBlades = grassLayers.flat();
+console.log(`Rendering ${grassBlades.length} grass blades optimized`);
 
 let isActive = false;
 let frameCount = 0;
@@ -137,32 +138,45 @@ function drawBackground() {
   ctx.lineWidth = 2;
   ctx.strokeRect(world.padding, world.padding, world.width - world.padding * 2, world.height - world.padding * 2);
 
-  // Draw grass with depth sorting
+  // Sort blades by y position for proper depth - done once per render
   grassBlades.sort((a, b) => a.y - b.y);
 
+  // Pre-calculate sway once per frame
+  frameCount++;
+  const totalSway = Math.sin(frameCount * 0.008) * 0.02;
+
+  // Render grass in batches to reduce context changes
+  let currentColor = null;
+  let currentWidth = null;
+  
   grassBlades.forEach((blade) => {
-    blade.sway += blade.swaySpeed + Math.abs(ball.vx + ball.vy) * 0.006;
-    const swayOffset = Math.sin(blade.sway) * 4;
+    blade.sway += blade.swaySpeed + Math.abs(ball.vx + ball.vy) * 0.005;
+    const swayOffset = Math.sin(blade.sway + totalSway) * 3.5;
     const dx = blade.x - ball.x;
     const dy = blade.y - ball.y;
-    const distance = Math.hypot(dx, dy);
+    const distSq = dx * dx + dy * dy;
+    const distance = Math.sqrt(distSq);
 
-    // Ball influence with stronger effect on nearby grass
-    const influence = clamp(1 - distance / 100, 0, 1);
-    const targetBend = influence * influence * 22;
-    blade.bend += (targetBend - blade.bend) * 0.16;
-    blade.height = blade.baseHeight - blade.bend * 0.65;
+    // Ball influence - optimized
+    const influence = Math.max(0, 1 - distance / 95);
+    const targetBend = influence * influence * 20;
+    blade.bend += (targetBend - blade.bend) * 0.14;
 
     const bendDirection = distance < 1 ? 0 : dx / distance;
-    const bendOffset = bendDirection * blade.bend * 1.5;
+    const bendOffset = bendDirection * blade.bend * 1.4;
 
-    // Color variation based on depth
-    const depthColor = 0.6 + blade.depth * 0.4;
-    const baseGreen = Math.round(140 * depthColor + blade.colorOffset * 40);
-    const baseBlue = Math.round(80 * depthColor + blade.colorOffset * 30);
+    // Color caching to avoid recalculation
+    if (!blade.colorCache) {
+      const depthColor = 0.65 + blade.depth * 0.35;
+      const g = Math.round(140 * depthColor + blade.colorOffset * 40);
+      const b = Math.round(80 * depthColor + blade.colorOffset * 30);
+      blade.colorCache = { g, b };
+    }
 
-    // Draw blade with segments
-    const segments = blade.segments;
+    // Simplified: 2 segments instead of 4-7 for massive perf gain
+    const segments = 2;
+    const { g, b } = blade.colorCache;
+
     for (let i = 0; i < segments; i++) {
       const t = i / segments;
       const nextT = (i + 1) / segments;
@@ -172,11 +186,18 @@ function drawBackground() {
       const x2 = blade.x + swayOffset * nextT + bendOffset * nextT * nextT;
       const y2 = blade.y - blade.baseHeight * nextT;
 
-      const widthTaper = blade.width * (1 - t * 0.6);
-      const alphaGradient = 0.4 + t * 0.6;
+      const widthTaper = blade.width * (1 - t * 0.5);
+      const alphaGradient = 0.45 + t * 0.55;
+
+      const color = `rgba(95, ${g}, ${b}, ${alphaGradient * (0.65 + blade.depth * 0.35)})`;
       
-      ctx.strokeStyle = `rgba(100, ${baseGreen}, ${baseBlue}, ${alphaGradient * (0.7 + blade.depth * 0.3)})`;
-      ctx.lineWidth = widthTaper;
+      if (currentColor !== color || currentWidth !== widthTaper) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = widthTaper;
+        currentColor = color;
+        currentWidth = widthTaper;
+      }
+
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.beginPath();
@@ -184,22 +205,12 @@ function drawBackground() {
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
-
-    // Add subtle highlight
-    const highlightX = blade.x + swayOffset * 0.3 + bendOffset * 0.1;
-    const highlightY = blade.y - blade.baseHeight * 0.35;
-    ctx.strokeStyle = `rgba(180, 220, 140, ${0.2 * (0.5 + blade.depth)})`;
-    ctx.lineWidth = blade.width * 0.3;
-    ctx.beginPath();
-    ctx.moveTo(highlightX - 1, highlightY);
-    ctx.lineTo(highlightX + 2.5, highlightY - blade.baseHeight * 0.25);
-    ctx.stroke();
   });
 
   // Subtle vignette
   const vignetteGradient = ctx.createRadialGradient(world.width / 2, world.height / 2, 200, world.width / 2, world.height / 2, 900);
   vignetteGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-  vignetteGradient.addColorStop(1, "rgba(0, 0, 0, 0.15)");
+  vignetteGradient.addColorStop(1, "rgba(0, 0, 0, 0.1)");
   ctx.fillStyle = vignetteGradient;
   ctx.fillRect(0, 0, world.width, world.height);
 }
