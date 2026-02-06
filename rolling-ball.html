@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rolling Ball Meadow - Mini Games Hub</title>
+    <link rel="stylesheet" href="game-styles.css" />
+  </head>
+  <body>
+    <header class="game-header">
+      <nav class="nav">
+        <a href="index.html" class="brand">← Back to Games</a>
+        <div class="title">Rolling Ball Meadow</div>
+      </nav>
+    </header>
+
+    <main class="game-container">
+      <div class="game-info">
+        <div class="controls-info">
+          <h2>Controls</h2>
+          <p><strong>Arrow Keys</strong> or <strong>WASD</strong> to move</p>
+          <p><strong>Shift</strong> to sprint</p>
+          <p><strong>R</strong> or click Reset to restart</p>
+        </div>
+        <button id="reset" class="reset-button">Reset Game</button>
+      </div>
+
+      <div class="game-stage">
+        <canvas id="game" width="1200" height="700" aria-label="Rolling ball meadow game"></canvas>
+        <div class="hud">
+          <div class="stat">Speed: <span id="speed">0.00</span></div>
+          <div class="stat">Pos: <span id="position">0, 0</span></div>
+        </div>
+      </div>
+    </main>
+
+    <script src="game-main.js"></script>
+  </body>
+</html>
